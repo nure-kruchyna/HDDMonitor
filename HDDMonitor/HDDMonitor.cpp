@@ -3,26 +3,24 @@
 #include <CommCtrl.h>
 #include <ShlObj.h>
 #include <winioctl.h>
-#include <atlstr.h>
 #include <time.h>
 #include <shellapi.h>
-//#include <ntdddisk.h>
-//#include <map>
 
+//ID таймера
 #define IDT_TIMER 10
-
+//Сообщение от всплывающего уведомления
 #define WM_NOTIFYMENU WM_USER + 1
-
+//Константы
 #define MAX_LOADSTRING 100
 #define LIST_1_SIZE 6
 #define LIST_2_SIZE 2
 #define LIST_3_SIZE 3
-
+//Состояния здоровья диска
 #define HEALTH_NORMAL 0
 #define HEALTH_CAUTION 1
 #define HEALTH_BAD 2
 #define HEALTH_CRITICAL 3
-
+//Период автоматической проверки
 enum AutoCheckPeriod {
     Period30min = 0,
     Period1h,
@@ -32,27 +30,26 @@ enum AutoCheckPeriod {
     Period3d,
     Period7d
 };
-
+//настройки
 struct SETTINGS {
     BOOL Startup = TRUE;
     BOOL AutoCheck = TRUE;
-    AutoCheckPeriod CheckPeriod = AutoCheckPeriod::Period1d;
-    BOOL CheckOnStart = TRUE;
-    BOOL MakeLog = TRUE;
-    BOOL UserLogFolder = FALSE;
+    AutoCheckPeriod CheckPeriod = Period1d;
+    BOOL MakeLog = TRUE; // не используется
+    BOOL UserLogFolder = FALSE;  // не используется
     BOOL DisplayHEX = FALSE;
-    WCHAR UserDefinedPath[MAX_PATH] = L".\\";
+    WCHAR UserDefinedPath[MAX_PATH] = L".\\";  // не используется
     time_t LastCheckTime = time(NULL);
 };
-
+//Аттрибут SMART
 struct SMART_ATTRIBUTE {
-    BYTE m_ucAttribIndex;
-    DWORD m_dwAttribValue;
-    BYTE m_ucValue;
-    BYTE m_ucWorst;
-    DWORD m_dwThreshold;
+    BYTE Index;
+    DWORD RAWValue;
+    BYTE Value;
+    BYTE Worst;
+    DWORD Threshold;
 };
-
+//Свойства диска
 struct DISK {
     BOOL IsValid;
     DWORD DisksCount;
@@ -74,63 +71,61 @@ struct DISK {
 HINSTANCE hInst;                                // текущий экземпляр
 WCHAR szTitle[MAX_LOADSTRING];                  // Текст строки заголовка
 WCHAR szWindowClass[MAX_LOADSTRING];            // имя класса главного окна
-INT List1ColSize[LIST_1_SIZE] = { 30,220,70,70,70,80 };
+INT List1ColSize[LIST_1_SIZE] = { 30,220,70,70,70,80 }; // Константы для ширины колонок Listview
 INT List2ColSize[LIST_2_SIZE] = { 90,125 };
 INT List3ColSize[LIST_3_SIZE] = { 30,50,135 };
-SETTINGS CurrentSettings;
-DISK* ListDisks;
+SETTINGS CurrentSettings; //текущие настройки программы
+DISK* ListDisks;    // массив дисков
 BYTE ChoosenDisk = 0;
 UINT_PTR hTimer = 0;
 BOOL HideDlg;
-NOTIFYICONDATAW nIData;
+NOTIFYICONDATAW nIData; //иконка в трее
 
 
-// Отправить объявления функций, включенных в этот модуль кода:
-LRESULT CALLBACK    WndProc(HWND, UINT, WPARAM, LPARAM);
+//объявления функций
 INT_PTR CALLBACK    MainWnd(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK    Settings(HWND, UINT, WPARAM, LPARAM);
 
-BOOL                SettingsLoad(SETTINGS*);
-BOOL                SettingsStore(SETTINGS*);     
-DISK*               GetDisks();
-BOOL                GetDiskSMART(HANDLE, DISK*);
-void                GetDiskHealth(DISK*);
-BOOL                OutDisksToList(DISK*, HWND);
+BOOL                SettingsLoad(SETTINGS*); //загрузка настроек из файла
+BOOL                SettingsStore(SETTINGS*); //сохранение настроек в файл
+DISK*               GetDisks();//получение списка накопителей в системе
+BOOL                GetDiskSMART(HANDLE, DISK*); // получение SMART для определенного диска
+void                GetDiskHealth(DISK*); // рассчет количества здоровья определенного диска
+BOOL                OutDisksToList(DISK*, HWND); //вывод в ListView
 BOOL                OutDiskInfoToList(DISK*, HWND);
 BOOL                OutDiskSMARTToList(DISK*, HWND, SETTINGS&);
 void                OutDiskHealthToEdit(DISK*, HWND);
-void                AddToAutoStart(BOOL);
-void                TimerFunc(HWND, UINT, UINT_PTR, DWORD);
+void                AddToAutoStart(BOOL);// добавление в автозагрузку
+void                TimerFunc(HWND, UINT, UINT_PTR, DWORD); // функция обработчик таймера
 
 
-int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
-                     _In_opt_ HINSTANCE hPrevInstance,
-                     _In_ LPWSTR    lpCmdLine,
-                     _In_ int       nCmdShow)
+int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _In_ LPWSTR lpCmdLine, _In_ int nCmdShow)
 {
     UNREFERENCED_PARAMETER(hPrevInstance);
     
-    if (lstrcmpW(lpCmdLine, L"-h") == 0)
+    if (lstrcmpW(lpCmdLine, L"-h") == 0) // если тихий запуск
         HideDlg = TRUE;
     else
         HideDlg = FALSE;
 
     hInst = hInstance;
     
-    SettingsLoad(&CurrentSettings);
+    SettingsLoad(&CurrentSettings); // загружаем настройки
 
-    ListDisks = GetDisks();
+    ListDisks = GetDisks(); // получаем список дисков
     if (ListDisks != nullptr)
     {
-        if (CurrentSettings.AutoCheck == TRUE)
+        if (CurrentSettings.AutoCheck == TRUE)// запускаем таймер автопроверки, если нужно
         {
             hTimer = SetTimer(NULL, IDT_TIMER, 18000, (TIMERPROC)TimerFunc);     
         }
-        DialogBox(hInst, MAKEINTRESOURCE(IDD_MAINDLG), NULL, MainWnd);
+        DialogBox(hInst, MAKEINTRESOURCE(IDD_MAINDLG), NULL, MainWnd); // отображаетм главное меню
         delete[] ListDisks;
     }
 
-    AddToAutoStart(CurrentSettings.Startup);
+    AddToAutoStart(CurrentSettings.Startup);// добавляем в автозагрузку, если нужно
+
+    SettingsStore(&CurrentSettings); // сохраняем настройки
 
     KillTimer(NULL, hTimer);
     hTimer = 0;
@@ -144,7 +139,7 @@ INT_PTR CALLBACK MainWnd(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
     switch (message)
     {
     case WM_INITDIALOG:
-        
+        //создание и наполнение ListView
         SetClassLong(hDlg, GCL_HICONSM, (LONG)LoadIcon(hInst, MAKEINTRESOURCE(IDI_SMALL)));
         LVCOLUMN lvc;
         WCHAR szColTitle[256];
@@ -187,7 +182,7 @@ INT_PTR CALLBACK MainWnd(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
         ListView_SetExtendedListViewStyle(GetDlgItem(hDlg, IDC_LIST1), LVS_EX_FULLROWSELECT);
         ListView_SetExtendedListViewStyle(GetDlgItem(hDlg, IDC_LIST2), LVS_EX_FULLROWSELECT);
         ListView_SetExtendedListViewStyle(GetDlgItem(hDlg, IDC_LIST3), LVS_EX_FULLROWSELECT);
-
+        //вывод данных в ListView и в EditBox
         OutDisksToList(ListDisks, GetDlgItem(hDlg, IDC_LIST3));
 
         OutDiskInfoToList(&ListDisks[ChoosenDisk], GetDlgItem(hDlg, IDC_LIST2));
@@ -208,6 +203,7 @@ INT_PTR CALLBACK MainWnd(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 
         return (INT_PTR)TRUE;
     case WM_PAINT:
+        //сворачивание окна в трей, если надо
         if (HideDlg == TRUE)
         {
             nIData.cbSize = sizeof(NOTIFYICONDATAW);
@@ -224,6 +220,7 @@ INT_PTR CALLBACK MainWnd(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
         }
         break;
     case WM_NOTIFYMENU:
+        //обработка нажатий на иконку в трее
         switch (lParam)
         {
         case WM_RBUTTONUP:
@@ -240,14 +237,13 @@ INT_PTR CALLBACK MainWnd(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
             break;
         }
     case WM_COMMAND:
+        // обработка нажатий на кнопки
         switch (LOWORD(wParam))
         {
         case IDOK:
         case IDCANCEL:
             HideDlg = TRUE;
             SendMessage(hDlg, WM_PAINT, 0, 0);
-            //EndDialog(hDlg, LOWORD(wParam));
-            
             return (INT_PTR)TRUE;
             break;
         case IDC_BUTTON1:
@@ -286,6 +282,7 @@ INT_PTR CALLBACK MainWnd(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
             break;
         }
     case WM_NOTIFY:
+        //обработка одинарных и двойных нажатий на ListView
         switch (LOWORD(wParam))
         {
         case IDC_LIST1:
@@ -303,13 +300,13 @@ INT_PTR CALLBACK MainWnd(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 
             if (((LPNMHDR)lParam)->code == NM_CLICK)
             {
-                ChoosenDisk = SendMessage(GetDlgItem(hDlg, IDC_LIST3), LVM_GETNEXTITEM, -1, LVNI_FOCUSED);
+                ChoosenDisk = (BYTE)SendMessage(GetDlgItem(hDlg, IDC_LIST3), LVM_GETNEXTITEM, -1, LVNI_FOCUSED);
                 ListView_DeleteAllItems(GetDlgItem(hDlg, IDC_LIST2));
                 OutDiskInfoToList(&ListDisks[ChoosenDisk], GetDlgItem(hDlg, IDC_LIST2));
             }
             else if (((LPNMHDR)lParam)->code == NM_DBLCLK)
             {
-                ChoosenDisk = SendMessage(GetDlgItem(hDlg, IDC_LIST3), LVM_GETNEXTITEM, -1, LVNI_FOCUSED);
+                ChoosenDisk = (BYTE)SendMessage(GetDlgItem(hDlg, IDC_LIST3), LVM_GETNEXTITEM, -1, LVNI_FOCUSED);
                 ListView_DeleteAllItems(GetDlgItem(hDlg, IDC_LIST2));
                 ListView_DeleteAllItems(GetDlgItem(hDlg, IDC_LIST1));
                 OutDiskInfoToList(&ListDisks[ChoosenDisk], GetDlgItem(hDlg, IDC_LIST2));
@@ -331,6 +328,7 @@ INT_PTR CALLBACK MainWnd(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
         }
         break;
     case WM_CTLCOLORSTATIC:
+        //перекрашивание EditBox в зависимости от состояния диска
         if((HWND)lParam == GetDlgItem(hDlg, IDC_EDIT1))
         {
             switch (ListDisks[ChoosenDisk].HealthStatus)
@@ -353,9 +351,6 @@ INT_PTR CALLBACK MainWnd(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
             }
         }
         break;
-    case WM_DESTROY:
-        SettingsStore(&CurrentSettings);
-        break;
     }
     return (INT_PTR)FALSE;
 }
@@ -366,6 +361,7 @@ INT_PTR CALLBACK Settings(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
     switch (message)
     {
     case WM_INITDIALOG:
+        //инициализация элементов управления
         SendMessage(GetDlgItem(hDlg, IDC_CHECK1), BM_SETCHECK, CurrentSettings.Startup, 0);
         SendMessage(GetDlgItem(hDlg, IDC_CHECK2), BM_SETCHECK, CurrentSettings.AutoCheck, 0);
 
@@ -382,7 +378,6 @@ INT_PTR CALLBACK Settings(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 
         SendMessage(GetDlgItem(hDlg, IDC_COMBO1), CB_SETCURSEL, CurrentSettings.CheckPeriod, 0);
 
-        SendMessage(GetDlgItem(hDlg, IDC_CHECK3), BM_SETCHECK, CurrentSettings.CheckOnStart, 0);
         SendMessage(GetDlgItem(hDlg, IDC_CHECK4), BM_SETCHECK, CurrentSettings.MakeLog, 0);
         SendMessage(GetDlgItem(hDlg, IDC_CHECK5), BM_SETCHECK, CurrentSettings.UserLogFolder, 0);
 
@@ -404,9 +399,9 @@ INT_PTR CALLBACK Settings(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
         switch (LOWORD(wParam))
         {
         case IDOK:
+            //записть установленных настроек в переменную
             CurrentSettings.Startup = SendMessage(GetDlgItem(hDlg, IDC_CHECK1), BM_GETCHECK, 0, 0);
             CurrentSettings.AutoCheck = SendMessage(GetDlgItem(hDlg, IDC_CHECK2), BM_GETCHECK, 0, 0);
-            CurrentSettings.CheckOnStart = SendMessage(GetDlgItem(hDlg, IDC_CHECK3), BM_GETCHECK, 0, 0);
             CurrentSettings.MakeLog = SendMessage(GetDlgItem(hDlg, IDC_CHECK4), BM_GETCHECK, 0, 0);
             CurrentSettings.UserLogFolder = SendMessage(GetDlgItem(hDlg, IDC_CHECK5), BM_GETCHECK, 0, 0);
             if (CurrentSettings.UserLogFolder == TRUE)
@@ -433,6 +428,7 @@ INT_PTR CALLBACK Settings(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
             return (INT_PTR)TRUE;
             break;
         case IDC_CHECK2:
+            //переключение активности некоторых окон в зависимости от установленных Checkbox
             EnableWindow(GetDlgItem(hDlg, IDC_PERIOD), SendMessage(GetDlgItem(hDlg, IDC_CHECK2), BM_GETCHECK, 0, 0));
             EnableWindow(GetDlgItem(hDlg, IDC_COMBO1), SendMessage(GetDlgItem(hDlg, IDC_CHECK2), BM_GETCHECK, 0, 0));
             break;
@@ -445,6 +441,8 @@ INT_PTR CALLBACK Settings(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
             EnableWindow(GetDlgItem(hDlg, IDC_BUTTON1), SendMessage(GetDlgItem(hDlg, IDC_CHECK5), BM_GETCHECK, 0, 0));
             break;
         case IDC_BUTTON1:
+            //выбор пользовательской папки для логов
+            //не реализовано
             BROWSEINFO bi;
             WCHAR buff[MAX_PATH];
             bi.hwndOwner = hDlg;
@@ -463,6 +461,7 @@ INT_PTR CALLBACK Settings(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 
         switch (HIWORD(wParam))
         {
+            //обработка выбора в Combobox
         case CBN_SELCHANGE:
             CurrentSettings.CheckPeriod = AutoCheckPeriod((UINT)SendMessage((HWND)lParam, CB_GETCURSEL, 0, 0));
             break;
@@ -482,9 +481,9 @@ BOOL SettingsLoad(SETTINGS* Settings)
     WCHAR ExePath[MAX_PATH];
     WCHAR WorkDir[MAX_PATH];
     WCHAR DriveLetter[3];
-    GetModuleFileNameW(NULL, ExePath, MAX_PATH);
+    GetModuleFileNameW(NULL, ExePath, MAX_PATH);// получаем путь к исполняемому файлу
     _wsplitpath_s(ExePath,DriveLetter, 3, WorkDir, MAX_PATH, NULL, NULL, NULL, NULL);
-    wsprintf(ExePath, L"%s%s\\Settings.ini", DriveLetter, WorkDir);
+    wsprintf(ExePath, L"%s%s\\Settings.ini", DriveLetter, WorkDir);// получаем путь к файлу настроек
 
     HANDLE SettingsFile=CreateFile(ExePath,GENERIC_READ,FILE_SHARE_READ,NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL,NULL);
     DWORD BytesRead;
@@ -496,7 +495,7 @@ BOOL SettingsLoad(SETTINGS* Settings)
         return FALSE;
     }
     
-    if (ReadFile(SettingsFile, &TSettings, sizeof(SETTINGS), &BytesRead, NULL) == 0)
+    if (ReadFile(SettingsFile, &TSettings, sizeof(SETTINGS), &BytesRead, NULL) == 0)//читаем настройки во временную переменную
     {
         MessageBox(NULL, L"Error, settings file corrupted. Defaults loaded", L"Error", MB_OK);
         CloseHandle(SettingsFile);
@@ -514,7 +513,7 @@ BOOL SettingsLoad(SETTINGS* Settings)
         if (TSettings.UserLogFolder == FALSE)
             wsprintf(TSettings.UserDefinedPath, L".\\");
 
-    memcpy(Settings, &TSettings, sizeof(SETTINGS));
+    memcpy(Settings, &TSettings, sizeof(SETTINGS));// сохраняем настройки в память
     CloseHandle(SettingsFile);
     return TRUE;
 }
@@ -546,7 +545,7 @@ BOOL SettingsStore(SETTINGS* Settings)
         }
     }
 
-    if (WriteFile(SettingsFile, Settings, sizeof(SETTINGS), &BytesWritten, NULL) == 0)
+    if (WriteFile(SettingsFile, Settings, sizeof(SETTINGS), &BytesWritten, NULL) == 0)//записываем настройки в файл
     {
         MessageBox(NULL, L"Error while storing settings", L"Error", MB_OK);
         CloseHandle(SettingsFile);
@@ -586,7 +585,7 @@ DISK* GetDisks()
     }
 
     BuffSize = sizeof(DWORD);
-    sRet = RegQueryValueExW(Reg, L"Count", NULL, NULL, (BYTE*)&NOfDisks, &BuffSize);
+    sRet = RegQueryValueExW(Reg, L"Count", NULL, NULL, (BYTE*)&NOfDisks, &BuffSize);//читаем из реестра количество физических жестких дисков
     if (sRet != ERROR_SUCCESS)
     {
         MessageBox(NULL, L"Error while reading registry item", L"Critical error!", MB_OK);
@@ -597,7 +596,7 @@ DISK* GetDisks()
 
     TempDiskArray = new DISK[NOfDisks];
     TempDiskArray[0].DisksCount = NOfDisks;
-
+    //производим для каждого диска сбор сведений
     for (unsigned int i = 0; i < NOfDisks; i++)
     {
         wsprintf(DrivePath, L"\\\\.\\PhysicalDrive%i", i);
@@ -608,7 +607,7 @@ DISK* GetDisks()
             delete[] TempDiskArray;
             return NULL;
         }
-        
+        //получаем размер структуры
         bRet = DeviceIoControl(hCurDisk, IOCTL_STORAGE_QUERY_PROPERTY, &query, sizeof(STORAGE_PROPERTY_QUERY), &storageDescriptorHeader, sizeof(STORAGE_DESCRIPTOR_HEADER), &BuffSize, NULL);
         if (bRet == 0)
         {
@@ -618,11 +617,11 @@ DISK* GetDisks()
             return NULL;
         }
         
-
+        //выделяем память
         DWORD dwOutBufferSize = storageDescriptorHeader.Size;
         BYTE* pOutBuff = new BYTE[dwOutBufferSize];
         ZeroMemory(pOutBuff, dwOutBufferSize);
-
+        //получаем свойства диска
         bRet = DeviceIoControl(hCurDisk, IOCTL_STORAGE_QUERY_PROPERTY, &query, sizeof(STORAGE_PROPERTY_QUERY), pOutBuff, dwOutBufferSize, &BuffSize, NULL);
         if (bRet == 0)
         {
@@ -642,7 +641,7 @@ DISK* GetDisks()
             delete[] pOutBuff;
             continue;
         }
-
+        //записываем информацию в память
         TempDiskArray[i].IsValid = TRUE;
         TempDiskArray[i].DiskNumber = i;
         memcpy(TempDiskArray[i].DiskName, pOutBuff + des->ProductIdOffset, sizeof(BYTE)*40);
@@ -652,7 +651,7 @@ DISK* GetDisks()
         memcpy(TempDiskArray[i].Vendor, pOutBuff + des->VendorIdOffset, sizeof(BYTE) * 8);
 
         delete[] pOutBuff;
-
+        //узнаем размеры диска
         bRet = DeviceIoControl(hCurDisk, IOCTL_DISK_GET_DRIVE_GEOMETRY_EX, NULL, 0, &CurDiskLen, sizeof(DISK_GEOMETRY_EX), &BuffSize, NULL);
         if (bRet == 0)
         {
@@ -665,8 +664,8 @@ DISK* GetDisks()
         TempDiskArray[i].Capacity = CurDiskLen.DiskSize.QuadPart;
         TempDiskArray[i].BytesPerSector = CurDiskLen.Geometry.BytesPerSector;
 
-        GetDiskSMART(hCurDisk, &TempDiskArray[i]);
-        GetDiskHealth(&TempDiskArray[i]);
+        GetDiskSMART(hCurDisk, &TempDiskArray[i]); // получаем SMART
+        GetDiskHealth(&TempDiskArray[i]);// рассчитываем здоровье
         
         CloseHandle(hCurDisk);   
     }
@@ -684,7 +683,7 @@ BOOL GetDiskSMART(HANDLE hDisk, DISK* Disk)
     UCHAR ucT1;
     PBYTE pT1, pT3; PDWORD pT2;
     SMART_ATTRIBUTE* pSmartValues;
-
+    // производим запрос SMART параметров диска
     stCIP.cBufferSize = READ_ATTRIBUTE_BUFFER_SIZE;
     stCIP.bDriveNumber = 0;
     stCIP.irDriveRegs.bFeaturesReg = READ_ATTRIBUTES;
@@ -699,28 +698,31 @@ BOOL GetDiskSMART(HANDLE hDisk, DISK* Disk)
     {
         Disk->SmartValuesCount = 0;
         pT1 = (PBYTE)(((SENDCMDOUTPARAMS*)szAttributes)->bBuffer);
-        for (ucT1 = 0; ucT1 < 30; ++ucT1)
+        for (ucT1 = 0; ucT1 < 30; ++ucT1)//проходим по всем аттрибутам
         {
             pT3 = &pT1[2 + ucT1 * 12];
             pT2 = (PDWORD)&pT3[INDEX_ATTRIB_RAW];
             pT3[INDEX_ATTRIB_RAW + 2] = pT3[INDEX_ATTRIB_RAW + 3] = pT3[INDEX_ATTRIB_RAW + 4] = pT3[INDEX_ATTRIB_RAW + 5] = pT3[INDEX_ATTRIB_RAW + 6] = 0;
             if (pT3[INDEX_ATTRIB_INDEX] != 0)
             {
+                //записываем аттрибут в память
                 pSmartValues = &Disk->DiskSMART[Disk->SmartValuesCount];
-                pSmartValues->m_ucAttribIndex = pT3[INDEX_ATTRIB_INDEX];
-                pSmartValues->m_ucValue = pT3[INDEX_ATTRIB_VALUE];
-                pSmartValues->m_ucWorst = pT3[INDEX_ATTRIB_WORST];
-                pSmartValues->m_dwAttribValue = pT2[0];
-                pSmartValues->m_dwThreshold = MAXDWORD;
+                pSmartValues->Index = pT3[INDEX_ATTRIB_INDEX];
+                pSmartValues->Value = pT3[INDEX_ATTRIB_VALUE];
+                pSmartValues->Worst = pT3[INDEX_ATTRIB_WORST];
+                pSmartValues->RAWValue = pT2[0];
+                pSmartValues->Threshold = MAXDWORD;
                 if (pT3[INDEX_ATTRIB_INDEX] == SMART_TEMPERATURE)
                 {
+                    //выносим температуру в отдельную переменную для удобства
                     if (pT2[0] > 200)
                     {
+                        //для некоторых жестких дисков Seagete или Hitachi
                         Disk->TempCurrent = pT3[INDEX_ATTRIB_RAW];
                     }
                     else
                     {
-                        Disk->TempCurrent = pSmartValues->m_dwAttribValue;
+                        Disk->TempCurrent = (BYTE)pSmartValues->RAWValue;
                     }
                 }
                 Disk->SmartValuesCount++;
@@ -729,7 +731,7 @@ BOOL GetDiskSMART(HANDLE hDisk, DISK* Disk)
     }
     else
         dwRet = GetLastError();
-    
+    //запрашиваем пороговые значения аттрибутов
     stCIP.irDriveRegs.bFeaturesReg = READ_THRESHOLDS;
     stCIP.cBufferSize = READ_THRESHOLD_BUFFER_SIZE;
     bRet = DeviceIoControl(hDisk, SMART_RCV_DRIVE_DATA, &stCIP, sizeof(stCIP), szAttributes, sizeof(SENDCMDOUTPARAMS) + READ_ATTRIBUTE_BUFFER_SIZE - 1, &dwRet, NULL);
@@ -744,8 +746,9 @@ BOOL GetDiskSMART(HANDLE hDisk, DISK* Disk)
             pT3[INDEX_ATTRIB_RAW + 2] = pT3[INDEX_ATTRIB_RAW + 3] = pT3[INDEX_ATTRIB_RAW + 4] = pT3[INDEX_ATTRIB_RAW + 5] = pT3[INDEX_ATTRIB_RAW + 6] = 0;
             if (pT3[INDEX_ATTRIB_INDEX] != 0)
             {
+                //записываем в память
                 pSmartValues = &Disk->DiskSMART[i];
-                pSmartValues->m_dwThreshold = (BYTE)pT2[INDEX_ATTRIB_INDEX];
+                pSmartValues->Threshold = (BYTE)pT2[INDEX_ATTRIB_INDEX];
                 i++;
             }
         }
@@ -762,28 +765,28 @@ void GetDiskHealth(DISK* Disk)
 
     for (BYTE i = 0; i < Disk->SmartValuesCount; i++)
     {
-        if (Disk->DiskSMART[i].m_ucValue < Disk->DiskSMART[i].m_dwThreshold)
+        if (Disk->DiskSMART[i].Value < Disk->DiskSMART[i].Threshold)
         {
             CriticalNum += 20;  
         }
-        if (Disk->DiskSMART[i].m_dwAttribValue > 0)
+        if (Disk->DiskSMART[i].RAWValue > 0)
         {
-            if (Disk->DiskSMART[i].m_ucAttribIndex == SMART_REALLOCATED_SECTOR_COUNT ||
-                Disk->DiskSMART[i].m_ucAttribIndex == SMART_SEEK_ERROR_RATE ||
-                Disk->DiskSMART[i].m_ucAttribIndex == SMART_SPIN_RETRY_COUNT ||
-                Disk->DiskSMART[i].m_ucAttribIndex == SMART_CURRENT_PENDING_SECTOR_COUNT ||
-                Disk->DiskSMART[i].m_ucAttribIndex == SMART_REALLOCATION_EVENT_COUNT||
-                Disk->DiskSMART[i].m_ucAttribIndex == SMART_UNCORRECTABLE_SECTOR_COUNT ||
-                Disk->DiskSMART[i].m_ucAttribIndex == SMART_WRITE_ERROR_RATE||
-                Disk->DiskSMART[i].m_ucAttribIndex == SMART_REPORTED_UNC_ERRORS
+            if (Disk->DiskSMART[i].Index == SMART_REALLOCATED_SECTOR_COUNT ||
+                Disk->DiskSMART[i].Index == SMART_SEEK_ERROR_RATE ||
+                Disk->DiskSMART[i].Index == SMART_SPIN_RETRY_COUNT ||
+                Disk->DiskSMART[i].Index == SMART_CURRENT_PENDING_SECTOR_COUNT ||
+                Disk->DiskSMART[i].Index == SMART_REALLOCATION_EVENT_COUNT||
+                Disk->DiskSMART[i].Index == SMART_UNCORRECTABLE_SECTOR_COUNT ||
+                Disk->DiskSMART[i].Index == SMART_WRITE_ERROR_RATE||
+                Disk->DiskSMART[i].Index == SMART_REPORTED_UNC_ERRORS
                 )
             {
                 CriticalNum += 5;
             }
-            if (Disk->DiskSMART[i].m_ucAttribIndex == SMART_DISK_SHIFT ||
-                Disk->DiskSMART[i].m_ucAttribIndex == SMART_G_SENSE_ERROR_RATE ||
-                Disk->DiskSMART[i].m_ucAttribIndex == SMART_GSENSE_ERROR_RATE ||
-                Disk->DiskSMART[i].m_ucAttribIndex == SMART_FREE_FALL_EVENT_COUNT
+            if (Disk->DiskSMART[i].Index == SMART_DISK_SHIFT ||
+                Disk->DiskSMART[i].Index == SMART_G_SENSE_ERROR_RATE ||
+                Disk->DiskSMART[i].Index == SMART_GSENSE_ERROR_RATE ||
+                Disk->DiskSMART[i].Index == SMART_FREE_FALL_EVENT_COUNT
                 )
             {
                 CriticalNum += 50;
@@ -810,6 +813,7 @@ BOOL OutDisksToList(DISK* Disks, HWND hList)
     lItem.cchTextMax = 40;
     if (Disks == nullptr)
         return FALSE;
+    //выводим информацию для каждого диска
     for (unsigned int i = 0, j = 0; i < Disks[0].DisksCount; i++)
     {
         if (Disks[i].IsValid == TRUE)
@@ -843,7 +847,7 @@ BOOL OutDiskInfoToList(DISK* Disk, HWND hList)
     lItem.cchTextMax = 40;
     if (Disk == nullptr)
         return FALSE;
-    
+    //выводим информацию про даный конкретный диск
     lItem.iItem = 0;
     lItem.iSubItem = 0;
     wsprintf(Buff, L"Модель");
@@ -889,6 +893,15 @@ BOOL OutDiskInfoToList(DISK* Disk, HWND hList)
     lItem.iSubItem = 1;
     MultiByteToWideChar(CP_ACP, MB_PRECOMPOSED, (char*)&Disk->Vendor, 8, Buff, 40);
     ListView_SetItem(hList, &lItem);
+
+    lItem.iItem++;
+    lItem.iSubItem--;
+    wsprintf(Buff, L"Байт в секторе");
+    ListView_InsertItem(hList, &lItem);
+
+    lItem.iSubItem = 1;
+    wsprintf(Buff, L"%u", Disk->BytesPerSector);
+    ListView_SetItem(hList, &lItem);
     
     return TRUE;
 }
@@ -903,53 +916,40 @@ BOOL OutDiskSMARTToList(DISK* CurDisk, HWND hList, SETTINGS &cSettings)
     lItem.cchTextMax = 40;
     if (CurDisk == nullptr)
         return FALSE;
-
+    //выводим все аттрибуты данного диска
     for (unsigned int i = 0; i < CurDisk->SmartValuesCount; i++)
     {
         lItem.iItem = i;
         lItem.iSubItem = 0;
-        wsprintf(Buff, L"%u", CurDisk->DiskSMART[i].m_ucAttribIndex);
+        wsprintf(Buff, L"%u", CurDisk->DiskSMART[i].Index);
         ListView_InsertItem(hList, &lItem);
 
 
         lItem.iSubItem = 1;
-        wsprintf(Buff, L"%s", SmartToWstrParametr(CurDisk->DiskSMART[i].m_ucAttribIndex));
+        wsprintf(Buff, L"%s", SmartToWstrParametr(CurDisk->DiskSMART[i].Index));
         ListView_SetItem(hList, &lItem);
-        /*if (CurDisk->DiskSMART[i].m_ucAttribIndex == 5 ||
-            CurDisk->DiskSMART[i].m_ucAttribIndex == 197||
-            CurDisk->DiskSMART[i].m_ucAttribIndex == 187|| 
-            CurDisk->DiskSMART[i].m_ucAttribIndex == 191||
-            CurDisk->DiskSMART[i].m_ucAttribIndex == 196 || 
-            CurDisk->DiskSMART[i].m_ucAttribIndex == 198 || 
-            CurDisk->DiskSMART[i].m_ucAttribIndex == 200||
-            CurDisk->DiskSMART[i].m_ucAttribIndex == 220)
-        {
-            lItem.iSubItem = 1;
-            wsprintf(Buff, L"%s", L"CRITICAL!");
-            ListView_SetItem(hList, &lItem);
-        }*/
  
         lItem.iSubItem = 2;
-        wsprintf(Buff, L"%u", CurDisk->DiskSMART[i].m_ucWorst);
+        wsprintf(Buff, L"%u", CurDisk->DiskSMART[i].Worst);
         ListView_SetItem(hList, &lItem);
 
         lItem.iSubItem = 3;
-        wsprintf(Buff, L"%u", CurDisk->DiskSMART[i].m_dwThreshold);
+        wsprintf(Buff, L"%u", CurDisk->DiskSMART[i].Threshold);
         ListView_SetItem(hList, &lItem);
 
         lItem.iSubItem = 4;
-        wsprintf(Buff, L"%u", CurDisk->DiskSMART[i].m_ucValue);
+        wsprintf(Buff, L"%u", CurDisk->DiskSMART[i].Value);
         ListView_SetItem(hList, &lItem);
 
         lItem.iSubItem = 5;
         
-        if (cSettings.DisplayHEX == TRUE)
+        if (cSettings.DisplayHEX == TRUE)//выводим RAW значение либо в десятичном либо в 16-ричном
         {
-            wsprintf(Buff, L"%#.8x", CurDisk->DiskSMART[i].m_dwAttribValue);
+            wsprintf(Buff, L"%#.8x", CurDisk->DiskSMART[i].RAWValue);
         }
         else 
         {
-            wsprintf(Buff, L"%u", CurDisk->DiskSMART[i].m_dwAttribValue);
+            wsprintf(Buff, L"%u", CurDisk->DiskSMART[i].RAWValue);
         }
         ListView_SetItem(hList, &lItem);
     }
@@ -960,7 +960,7 @@ void OutDiskHealthToEdit(DISK* Disk, HWND hList)
 {
     if (Disk == nullptr)
         return;
-    
+    //выводим статус диска
     switch (Disk->HealthStatus)
     {
     case HEALTH_NORMAL:
@@ -986,7 +986,7 @@ void AddToAutoStart(BOOL Add)
     WCHAR AppPath[MAX_PATH];
     WCHAR* tAppPath;
     WCHAR AppName[] = L"HDDmonitor";
-
+    //в ветвь автозапуска реестра
     sRet = RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run", REG_OPTION_NON_VOLATILE, KEY_ALL_ACCESS| KEY_WOW64_32KEY, &Reg);
     if (sRet != ERROR_SUCCESS)
     {
@@ -1004,7 +1004,7 @@ void AddToAutoStart(BOOL Add)
         }
         tAppPath = new WCHAR[MAX_PATH + 1];
         wsprintf(tAppPath, L"\"%s\"-h", AppPath);
-
+        //записываем имя исполняемого файла с аттрибутом фонового запуска
         sRet = RegSetValueExW(Reg, AppName, NULL, REG_SZ, (LPBYTE)tAppPath, sizeof(AppPath));
         delete[] tAppPath;
         if (sRet != ERROR_SUCCESS)
@@ -1015,6 +1015,7 @@ void AddToAutoStart(BOOL Add)
     }
     else if (Add == FALSE)
     {
+        //удаляем из автозагрузки, если флаг в настройках убран
         dRet = RegDeleteValueW(Reg, AppName);
     }
     RegCloseKey(Reg);
@@ -1023,8 +1024,10 @@ void AddToAutoStart(BOOL Add)
 void TimerFunc(HWND unnamedParam1, UINT unnamedParam2, UINT_PTR unnamedParam3, DWORD unnamedParam4)
 {  
     time_t NowTime = time(NULL);
+    //выясняем, сколько прошло с последней проверки
     double diff = difftime(NowTime, CurrentSettings.LastCheckTime);
     double desirebleDiff = 0;
+    //выясняем сколько должно было пройти
     switch (CurrentSettings.CheckPeriod)
     {
     case Period30min:
@@ -1049,6 +1052,7 @@ void TimerFunc(HWND unnamedParam1, UINT unnamedParam2, UINT_PTR unnamedParam3, D
         desirebleDiff = 604800;
         break;
     }
+    //если достаточно - проводим проверку
     if (diff > desirebleDiff)
     {
         if (ListDisks != nullptr)
@@ -1062,6 +1066,7 @@ void TimerFunc(HWND unnamedParam1, UINT unnamedParam2, UINT_PTR unnamedParam3, D
             {
                 switch (ListDisks[i].HealthStatus)
                 {
+                    //вывод уведомления в трей о состоянии здоровья диска, если есть проблемы
                 case HEALTH_CAUTION:
                     nIData.uFlags = NIF_INFO | NIF_GUID;
                     wsprintf(nIData.szInfo, L"С одним из ваших жестких дисков возникла проблема");

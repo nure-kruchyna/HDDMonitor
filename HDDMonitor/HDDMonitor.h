@@ -2,7 +2,7 @@
 
 #include "resource.h"
 
-//SMART attribute constants
+//Индексы SMART аттрибутов
 #define SMART_RAW_READ_ERROR_RATE                    1
 #define SMART_THROUGHPUT_PERFORMANCE                 2
 #define SMART_SPIN_UP_TIME                           3
@@ -81,6 +81,7 @@
 #define SMART_READ_ERROR_RETRY_RATE                  250
 #define SMART_FREE_FALL_EVENT_COUNT                  254
 
+//индексы значений в структуре данных
 #define INDEX_ATTRIB_INDEX                                  0
 #define INDEX_ATTRIBUTE_STATUSFLAGS                         1
 #define INDEX_ATTRIB_UNKNOWN                                2
@@ -89,7 +90,7 @@
 #define INDEX_ATTRIB_RAW                                    5
 
 
-LPCWSTR SmartToWstrParametr(DWORD dwParam)
+LPCWSTR SmartToWstrParametr(DWORD dwParam) // переведение индексов в читаемую форму
 {
     switch (dwParam)
     {
